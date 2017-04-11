@@ -33,7 +33,7 @@ bookbasket_use
 
 The output below shows the top *n* books by number of copies sold. (*n* can be set to any value, but is currently 20)
 
-The title "Wild Animus" has been excluded from this list, despite 
+The title "Wild Animus" has been excluded from this list, despite selling almost twice as many copies as the next-highest title. For more info on the reasons behind the omission, read https://litreactor.com/columns/what-the-hell-is-wild-animus
 
 ```{r}
 COUNT.TABLE = as.data.frame(bookCount)
