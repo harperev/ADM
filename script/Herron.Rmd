@@ -1,0 +1,167 @@
+---
+title: "(A)Priori Incantatem: Book Recommendations for Flourish & Blotts"
+author: "Quentin Herron"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Preparation
+
+```{r}
+getwd()
+setwd("C:/Users/Evan/OneDrive/Documents/BIA 6301 - ADM/Week 4/HW 4/HW 4 Git/data")
+
+library(arules) 
+bookbaskets = read.transactions("bookdata.tsv.gz", format="single",
+                                 sep="\t", 
+                                 cols=c("userid", "title"),
+                                 rm.duplicates=T)
+
+basketSizes = size(bookbaskets) #Calculate number of books purchased by "userID"
+
+bookFreq = itemFrequency(bookbaskets) #Calculate the support for each book title 
+
+bookCount = (bookFreq/sum(bookFreq))*sum(basketSizes) 
+#   Get the absolute count of book occurrences. 
+
+bookbasket_use = bookbaskets[basketSizes > 1] #Only keep transactions with more than one book purchased. 
+
+bookbasket_use
+```
+
+# Best-selling Titles
+
+The output below shows the top *n* books by number of copies sold. (*n* can be set to any value, but is currently 20)
+
+The title "Wild Animus" has been excluded from this list, despite 
+
+```{r}
+COUNT.TABLE = as.data.frame(bookCount)
+
+bookTitle = rownames(COUNT.TABLE)
+COUNT.LIST = cbind(bookTitle = bookTitle, COUNT.TABLE)
+
+# Create a subset to sort based on copies sold, and exclude "Wild Animus".
+BEST.SELLERS = as.data.frame(
+  subset(COUNT.LIST[                   # Define a subset of the full book list by the criteria below
+    order(-bookCount), ],              ### Sort bookCount in descending order
+    bookTitle != "Wild Animus"         ### Exclude the title "Wild Animus"
+    )
+) 
+
+# Remove the duplicate column of book titles
+rownames(BEST.SELLERS) = NULL
+# And define new column names for a more readable output
+colnames(BEST.SELLERS) = c("Book Title", "Copies Sold")
+
+head(BEST.SELLERS, 20)
+# Change the value of 20 to return fewer or more results.
+```
+
+# Book Club Recommendations
+
+The model below is intended to find more recommendations for a "Book Club" display, based on a specified list of best-selling literary fiction titles (typically, titles which appear on Oprah's Book Club list).
+
+This works by searching for customers who bought any of the books listed, and displaying another book they were likely to buy as well.
+
+The significance of these relationships is evaluated by three measurements: **support**, **confidence**, and **lift**.
+- **Support** is a percentage value that measures how many of the total transactions contained a particular set of the listed books.
+- **Confidence** is the probability that a transaction containing that set of listed books will also contain a "related" book.
+- **Lift** tells us how much more likely it is that a related book is purchased when listed books are also purchased, compared to the related book's normal purchases.
+
+As an example, the first result of the model below predicts that customers who buy *Bridget Jones's Diary*, *House of Sand and Fog*, *Where the Heart Is*, and *White Oleander* are also likely to buy the related book, **The Book of Ruth**.
+- A support value of 0.0005 means that 0.5 percent of the tens of thousands of transactions contained this group of four books.
+- Confidence of 0.875 shows that 87.5 percent of those who bought the four books from our list **also** bought *The Book of Ruth*.
+- Lift of 109.23 says that it is 109 times more likely that someone buys *The Book of Ruth* if they've also bought those four listed books, compared to the overall random chance of someone buying that book.
+
+```{r}
+BOOK.CLUB.APRIORI = apriori(bookbasket_use,
+                        parameter = list(
+                          support = 0.0005,
+                          confidence = 0.75,
+                          minlen = 2,
+                          maxlen = 10
+                        ),
+                        appearance = list(
+                          lhs = c("The Lovely Bones: A Novel",
+                                  "She's Come Undone",
+                                  "The Nanny Diaries: A Novel",
+                                  "A Painted House",
+                                  "Bridget Jones's Diary",
+                                  "Divine Secrets of the Ya-Ya Sisterhood: A Novel",
+                                  "The Secret Life of Bees",
+                                  "White Oleander : A Novel",
+                                  "The Deep End of the Ocean",
+                                  "Where The Heart Is",
+                                  "House of Sand and Fog",
+                                  "East of Eden"
+                                  ),
+                          default = "rhs"
+                          )
+                        )
+
+BOOK.CLUB.APRIORI.SORTED = sort(BOOK.CLUB.APRIORI,
+                            by = c("lift",
+                                   "confidence"
+                                   )
+                            )
+
+# inspect(BOOK.CLUB.APRIORI.SORTED) # Returns all results. Delete the first #
+inspect(BOOK.CLUB.APRIORI.SORTED[1:10])
+```
+
+This gives some potential recommendations for the "Book Club" display:
+- The Book of Ruth
+- Midwives
+- Stones from the River
+- Jewel
+- While I was Gone
+- Good in Bed
+- Summer Sisters
+- The Pilot's Wife
+- The Girls' Guide to Hunting and Fishing
+- The Joy Luck Club
+- Snow Falling on Cedars
+- The Red Tent
+
+Note that the list of books in the initial "basket" can be changed as desired to give other results.
+
+
+# Other Recommendations
+
+The same method can be used to cast a wider net and make recommendations based on the entire dataset.
+
+However, the prevalance of series books complicates this search. Books like the Harry Potter series are very frequently bought together. To ensure our data is useful, these obvious associations need to be filtered out.
+
+```{r}
+BOOKS.APRIORI = apriori(bookbasket_use,
+                        parameter = list(
+                          support = 0.0015,
+                          confidence = 0.80,
+                          minlen = 2,
+                          maxlen = 10
+                        ),
+                        appearance = list(
+                          default = "both"
+                        )
+)
+
+BOOKS.APRIORI.SORTED = sort(BOOKS.APRIORI,
+                            by = c("lift",
+                                   "confidence"
+                                   )
+                            )
+inspect(BOOKS.APRIORI.SORTED[1:10])
+
+## `%notin%` = Negate(`%in%`)
+
+## BOOKS.RULES = subset(BOOKS.APRIORI.SORTED, 
+##                     %notin% c(
+##                       "Harry Potter",
+##                       "One for the Money"
+##                     ))
+```
+
+*Ran out of time. Couldn't figure out how to remove series from results.*
+
+
