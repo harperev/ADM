@@ -1,0 +1,558 @@
+---
+title: 'Assignment 6: Predicting Term Deposits'
+author: "Quentin Herron"
+date: "April 25, 2017"
+output: html_document
+---
+
+```{r echo = FALSE}
+setwd("C:/Users/Evan/OneDrive/Documents/BIA 6301 - ADM/Week 6/HW 6/Assignment 6/data")
+
+library(readr)
+bank_full = read_csv("bank-full.csv")
+
+bank_alt = read.csv("bank-full.csv")
+
+attach(bank_full)
+
+```
+
+# Predicting Term Deposits
+
+We can use several different methods to better understand our term deposit market. These can help us develop customer profiles of likely subscribers, determine which factors do (or do not) impact that outcome, and even predict the chance that someone will subscribe.
+
+#### Exploratory Analysis
+
+Before we get into building models and making predictions, we should take a moment to understand the makeup of our data.
+
+```{r}
+TD.COUNT = as.data.frame(
+  table(
+    bank_full$`y::category`
+    )
+  )
+
+colnames(TD.COUNT) = c(
+  "Subscribed to TD?", 
+  "Count"
+  )
+
+TD.COUNT
+
+```
+
+The table above shows the number of customers who did and did not subscribe to a TD. Out of 45,000 customers listed, only 5,000--or 1 in 9--purchased a term deposit with us.
+
+
+### Decision Tree
+
+This method automatically picks the most useful predictors of our desired outcome, and visually arranges them into a decision tree--a flowchart that's easy to follow.
+
+```{r}
+### Step 1: Create Train and Test Sets (80/20 split)
+set.seed(123) # So that results based on RNG are reproducable
+# Randomize the dataset
+bank.RAND = bank_full[order(runif(45211)), ]
+
+bank.TRAIN = bank.RAND[1:36169, ]
+
+bank.TEST = bank.RAND[36170:45211, ]
+
+### Step 2: Grow the Tree
+library(rpart)
+TREE.RPART = rpart(
+  bank.TRAIN$`y::category` ~ .,
+  method = "class",
+  parms = list(
+    split = "information"
+  ),
+  data = bank.TRAIN
+)
+
+### Step 3: Visualize the Tree
+library(rpart.plot)
+rpart.plot(
+  TREE.RPART,
+  type = 2,
+  extra = 106
+  )
+# ?rpart.plot # Documentation for tree plotting
+
+### Step 4: Prune the Tree
+# Not necessary: this tree isn't overly complex.
+
+```
+
+The result above is our decision tree. By looking at the branches, we can see which criteria were most important in explaining a yes or no outcome. In this case, there are only two--**duration** of last contact and **poutcome**, or the outcome of the previous marketing campaign.
+
+To understand how the decision tree works, let's create an imaginary customer, #45212. All we need to know about #45212 is that the duration of their last contact with marketing was **600** seconds, and the outcome of the previous campaign with them was a **success**.
+
+Starting at the top ("root"), we answer the yes/no questions about our customer until we arrive at a "leaf".
+* Is **duration** less than 408? *No*, so we follow the box labeled "no" and take the right branch.
+* Is **duration** less than 648? *Yes*, so this time we go left.
+* Is the **previous outcome** recorded as a "failure", "other", or "unknown"? *No*, it was a "success", so we take the leaf on the right side, which contains our results.
+
+The leaf itself contains a lot of additional useful information about our customer as they compare with everyone else.
+* The "yes" indicates that customers who fall onto this leaf are more likely to buy our term deposit.
+* The decimal value is the probability of a "yes", given that you met all the criteria to arrive at that leaf.
+  + In this case, our customer has an 81% chance of subscribing.
+* The color of the leaf also reflects this probability. A deeper green means a higher chance of "yes", while a deeper blue indicates a near-zero chance of "yes".
+* Finally, the percent at the bottom shows the proportion of customers who meet the criteria for each leaf.
+  + Our leaf shows 0%, which is simply rounded down from some non-zero value.
+  + Keep in mind that even 1% of our data is 450 customers.
+  
+#### Evaluating the Decision Tree
+
+The decision tree won't be the only model we use. So we need a standardized way of measuring its performance, which we can also apply to and compare across other models to find the best tool for prediction.
+
+To that end, we will break our data into a **training set** and a **test set** for each model. 
+The basic idea is to "teach" the model using most of the data, and then "test" it on the rest. We can then assign a score based on how well the model can predict the test data.
+
+Think of it like studying practice material and then sitting for an exam.
+
+```{r}
+### Step 4: Test and Validate
+
+library(caret)
+
+TREE.ACTUAL = bank.TEST$`y::category`
+TREE.PREDICTED = predict(
+  TREE.RPART,
+  bank.TEST,
+  type = "class"
+)
+
+TREE.RESULTS = confusionMatrix(
+  TREE.PREDICTED,
+  TREE.ACTUAL,
+  positive = "yes"
+)
+
+print(TREE.RESULTS)
+
+```
+
+**Takeaways: Decision Tree**
+
+* Accuracy of 89.79%
+
+This looks good, until we break it down further.
+
+* Sensitivity of 33%
+  + This is the rate at which *yes* was correctly predicted.
+* Specificity of 97%
+  + This is the rate at which *no* was correctly predicted.
+  
+In summary, what we have is a model that can tell you with near-certainty when someone *will not* buy a TD,
+  but is worth less than a coin flip if you want to predict who *will* buy a TD.
+
+
+### Random Forest
+
+A potential issue with our decision tree is that it only used two unique predictors. However, it's very likely that more than two of our variables are helping to explain whether or not a customer might subscribe.
+
+The solution to this is to create a "random forest"--so named because it is essentially a large collection of randomly-generated decision trees.
+
+With a random forest, there are hundreds of decision trees being generated, and comparing them all by sight would be tedious if not impossible. Thus, you really don't want to "see the forest for the trees" in this case.
+
+The tradeoff for losing the visual, though, is that we can potentially get a much stronger model (recall that our one tree only made a correct prediction about subscribers 33% of the time). This is because each one of the random trees will "vote" by predicting whether a given customer will or will not subscribe, and the majority decides the final prediction. Fortunately, theese trees are a little more hasty in their decision-making than the Ents in *The Lord of the Rings*.
+
+```{r}
+library(caret)
+library(randomForest)
+
+### Step 1: Create Train and Test Sets
+
+set.seed(123)
+
+CARET.TRAIN.INDEX = createDataPartition(
+  bank_alt$y..category,
+  p = 0.8,
+  list = FALSE,
+  times = 1
+)
+
+bank.CARET.TRAIN = bank_alt[CARET.TRAIN.INDEX, ]
+bank.CARET.TEST = bank_alt[-CARET.TRAIN.INDEX, ]
+
+
+
+### Step 2: Build Random Forest
+
+FOREST.MODEL = randomForest(
+  bank.CARET.TRAIN$y..category ~ .,
+  data = bank.CARET.TRAIN,
+  mtry = 3,
+  ntree = 500,
+  na.action = na.omit,
+  importance = TRUE
+)
+
+### Step 3: Evaluate Predictors
+
+varImpPlot(FOREST.MODEL)
+
+```
+
+The plot above shows the importance of our data's variables in predicting a TD subscriber. **Duration** of contact is by far the strongest predictor, but just behind that are the **month** and **day** of contact.
+
+```{r}
+### Step 4: Test and Validate
+
+FOREST.ACTUAL = bank.CARET.TEST$y..category
+
+FOREST.PREDICTED = predict(
+  FOREST.MODEL,
+  newdata = bank.CARET.TEST,
+  type = "class"
+)
+
+FOREST.RESULTS = confusionMatrix(
+  FOREST.PREDICTED,
+  FOREST.ACTUAL,
+  positive = "yes"
+)
+
+print(FOREST.RESULTS)
+```
+
+**Takeaways: Random Forest**
+
+* Accuracy of 90.86% (improvement)
+
+* Sensitivity of 46% (Better, but still not ideal)
+  + This is the rate at which *yes* was correctly predicted.
+* Specificity of 97% (Very similar to the decision tree)
+  + This is the rate at which *no* was correctly predicted.
+  
+Even with the move from one decision tree to 500, we've only made a slight improvement in our model's predictive ability.
+  
+  
+### Logistic Regression
+
+Regression is often viewed as a "tried and true" method of analysis. It has a wide range of applications and is relatively simple to apply and understand.
+
+In particular, a *logistic* regression deals with predicting a "Yes" or "No" (binary) outcome. The result will be a prediction for each customer, expressed in both **odds** and **probability**, of how likely they are to buy a term deposit.
+
+```{r}
+### Step 1: Recode select Variables to make them more regression-friendly
+
+## Objectives:
+# Recode education as "educated"--yes if secondary or tertiary, else no.
+# Recode job as "student"--yes if student, else no.
+# Recode balance as "high.bal"--yes if over 10,000, else no.
+# Recode duration as "long.contact"--yes if over 300, else no.
+# Recode pdays as "prev.contact"--yes if >= 0 (-1 means no prev contact).
+# Recode previous as "freq.contact"--yes if 5 or more prev contacts, else no.
+# Recode poutcome as "prev.success"--yes if "success", else no.
+
+# Create a special subset of the training data to use with this function
+# Keep only the columns that will (likely) be used
+bank.LOGIT.TRAIN = bank.TRAIN[ , c(1, 2, 4, 5, 6, 7, 8, 12, 14, 15, 16, 17)]
+# Then add in the recoded colums
+bank.LOGIT.TRAIN$educated = ifelse(
+  bank.LOGIT.TRAIN$`education::category` == c(
+    "secondary",
+    "tertiary"
+  ),
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TRAIN$student = ifelse(
+  bank.LOGIT.TRAIN$`job::category` == 
+    "student",
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TRAIN$high.bal = ifelse(
+  bank.LOGIT.TRAIN$`balance::number` >= 
+    10000,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TRAIN$long.contact = ifelse(
+  bank.LOGIT.TRAIN$`duration::number` >= 
+    300,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TRAIN$prev.contact = ifelse(
+  bank.LOGIT.TRAIN$`pdays::number` >= 
+    0,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TRAIN$freq.contact = ifelse(
+  bank.LOGIT.TRAIN$`previous::number` >= 
+    5,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TRAIN$prev.success = ifelse(
+  bank.LOGIT.TRAIN$`poutcome::category` == 
+    "success",
+  1, # if True
+  0  # if False
+)
+
+
+### Step 2: Build "Full" Logit Model
+
+LOGIT.FULL = glm(
+  as.factor(bank.LOGIT.TRAIN$`y::category`) ~
+    `age::number` +
+    `default::category` +
+    `housing::category` +
+    `loan::category` +
+    student +
+    educated +
+    high.bal +
+    long.contact +
+    prev.contact +
+    freq.contact +
+    prev.success,
+  data = bank.LOGIT.TRAIN,
+  family = binomial()
+)
+
+summary(LOGIT.FULL)
+
+```
+
+```{r}
+### Step 3: Evaluate and Adjust Model
+# "Age" is not significant and can be removed immediately.
+# "educated" and "high.bal" are significant only to a 90% confidence, and can be omitted for simplicity's sake
+
+LOGIT.REDUCED = glm(
+  as.factor(bank.LOGIT.TRAIN$`y::category`) ~
+    `default::category` +
+    `housing::category` +
+    `loan::category` +
+    student +
+    long.contact +
+    prev.contact +
+    freq.contact +
+    prev.success,
+  data = bank.LOGIT.TRAIN,
+  family = binomial()
+)
+
+summary(LOGIT.REDUCED)
+
+# And now we have a nice logit model with lots of pretty stars.
+
+```
+
+```{r}
+### Step 4: Create a matching Test Set for Evaluation
+
+bank.LOGIT.TEST = bank.TEST[ , c(1, 2, 4, 5, 6, 7, 8, 12, 14, 15, 16, 17)]
+
+bank.LOGIT.TEST$educated = ifelse(
+  bank.LOGIT.TEST$`education::category` == c(
+    "secondary",
+    "tertiary"
+  ),
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TEST$student = ifelse(
+  bank.LOGIT.TEST$`job::category` == 
+    "student",
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TEST$high.bal = ifelse(
+  bank.LOGIT.TEST$`balance::number` >= 
+    10000,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TEST$long.contact = ifelse(
+  bank.LOGIT.TEST$`duration::number` >= 
+    300,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TEST$prev.contact = ifelse(
+  bank.LOGIT.TEST$`pdays::number` >= 
+    0,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TEST$freq.contact = ifelse(
+  bank.LOGIT.TEST$`previous::number` >= 
+    5,
+  1, # if True
+  0  # if False
+)
+
+bank.LOGIT.TEST$prev.success = ifelse(
+  bank.LOGIT.TEST$`poutcome::category` == 
+    "success",
+  1, # if True
+  0  # if False
+)
+
+### Step 5: Show Results
+
+# Show the odds of a "yes" when a given condition is met.
+exp(
+  cbind(
+    Odds_Ratio = coef(
+      LOGIT.REDUCED
+      )
+    )
+  )
+
+# Add the predicted probability of a "yes" to the test set dataframe.
+bank.LOGIT.TEST$Predict.TD = predict(
+  LOGIT.REDUCED,
+  newdata = bank.LOGIT.TEST,
+  type = "response"
+)
+
+# Show the first 10 observations, with their conditional variables, predicted prob, and actual outcome.
+head(
+  cbind(
+    bank.LOGIT.TEST[ , 13:19], 
+    "Probability" = bank.LOGIT.TEST$Predict.TD,
+    "Outcome" = bank.LOGIT.TEST$`y::category` 
+    ),
+  10
+  )
+
+```
+**Takeaways: Logistic Regression**
+
+Let's look at some of the Odds ratios in the first list.
+* **prev.success**  has an odds value of 10.7. This means that the odds of a subscription go up by almost 11 times for customers who were identified as a success in previous campaigns, compared to those who weren't.
+* **long.contact** has an odds value of 8.2, making it the next-strongest predictor. This is a yes/no category which identifies a customer as "long contact" if their previous contact was at least 300 seconds (5 min) in duration.
+
+And here are the rest of the variables, explained.
+
+- **default**: yes, if the customer has credit with us in default
+- **housing**: yes, if the customer has a mortgage loan
+- **loan**: yes, if the customer has a personal loan of any other type
+- **student**: yes, if the customer's occupation is listed as "student"
+- **prev.contact**: yes, if the customer has been previously contacted by marketing
+- **freq.contact**: yes, if they have also been contacted 5 or more times
+  
+The regression model has the advantage of easily predicting the chances that a given customer will subscribe, if we know all the required information about them. Additionally, the variables we used as inputs can be tailored to the interests of the specific question being asked (e.g. if we needed to differentiate occupation as blue collar workers, admin professionals, and retired people, instead of "student or not student")
+
+In the following section, we will see a side-by-side visual comparison of all three models.
+
+
+## Final Comparison
+
+These three models can be quickly visually compared using a graph called the ROC Curve (Receiver Operating Characteristic)
+
+A curve the hugs the left and top borders of the graph area is closer to an ideal predictor,
+while a curve that follows the diagonal line cutting across the graph is essentially useless as a predictor.
+
+
+```{r}
+### Step 6: Evaluate
+# Use a ROC Curve to visualize the True Positive vs False Positive rate.
+
+# Required packages. (uncomment and run)
+# install.packages("Deducer")
+# install.packages("rJava")
+
+# Need to install recent 64-bit Java
+
+# Sys.setenv(JAVA_HOME='C:/Program Files/Java/jre1.8.0_131')
+library(rJava)
+library(Deducer)
+library(ROCR)
+
+# Decision Tree
+TREE.ROC.PRED.PROB = predict(
+  TREE.RPART,
+  type = "prob",
+  bank.TEST
+)
+
+TREE.ROC.PRED = prediction(TREE.ROC.PRED.PROB[ , 2],
+                           bank.TEST$`y::category`
+                           )
+
+TREE.ROC.PERF = performance(TREE.ROC.PRED,
+                            "tpr",
+                            "fpr"
+                            )
+
+plot(TREE.ROC.PERF,
+     main = "ROC Curve for Decision Tree",
+     col = 2,
+     lwd = 2
+     )
+
+abline(
+  a = 0,
+  b = 1,
+  lwd = 2,
+  lty = 2,
+  col = "gray"
+)
+
+# Random Forest
+FOREST.ROC.PRED.PROB = predict(
+  FOREST.MODEL,
+  type = "prob",
+  bank.CARET.TEST
+)
+
+FOREST.ROC.PRED = prediction(FOREST.ROC.PRED.PROB[ , 2],
+                           bank.CARET.TEST$y..category
+                           )
+
+FOREST.ROC.PERF = performance(FOREST.ROC.PRED,
+                            "tpr",
+                            "fpr"
+                            )
+
+plot(FOREST.ROC.PERF,
+     main = "ROC Curve for Random Forest",
+     col = 2,
+     lwd = 2
+     )
+
+abline(
+  a = 0,
+  b = 1,
+  lwd = 2,
+  lty = 2,
+  col = "gray"
+)
+
+# Logistic Regression
+rocplot(
+  LOGIT.REDUCED,
+  diag = TRUE,
+  pred.prob.labels = FALSE,
+  prob.label.digits = 3,
+  AUC = TRUE
+)
+
+```
+
+Compare the ROC graph for the Decision Tree and the Random Forest.
+
+The second curve pulls much closer to the top-left corner, which indicates that the Random Forest model is an improvement in prediction.
+
+Compare that to the third graph, for the Regression model, which is better than the Tree, but not quite as good as the Forest.
+
+Our conclusion, then, is to focus on the Random Forest model--after an in-depth tweaking process to fine-tune performance, and a secondary emphasis on Logistic Regression, for the purpose of predicting and understanding our term deposit market.
