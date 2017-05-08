@@ -1,0 +1,439 @@
+---
+title: "Final Project"
+author: "Quentin Herron"
+date: "May 6, 2017"
+output: html_document
+---
+
+# Airline Safety
+
+**Question**: Does an airline's past history of accidents (1985-1999) affect its current safety record?
+
+```{r}
+library(fivethirtyeight)
+data(package = "fivethirtyeight")
+
+airline_orig = as.data.frame(airline_safety)
+```
+
+## Understanding the Data
+
+```{r}
+dim(airline_orig)
+
+names(airline_orig)
+```
+
+- We have data on 56 airlines.
+- Observations include total incidents, fatal accidents, and number of fatalities, for both the 1985-99 and 2000-14 time periods.
+- Regional subsidiaries are grouped in with their parent airlines, where applicable (indicated by **incl_reg_subsidiaries**)
+- **avail seat km per week** is a measurement of total distance flown times total available seats.
+
+## Formatting the Data
+
+First, let's adjust the data on the basis of seat-kilometers. By scaling all our variables to be "per trillion seat-km", we can compare the accident rates on a level playing field.
+
+```{r}
+# Add a column to the original dataset
+# to calculate and display the coefficient that scales each row to 1 trillion seat-km
+airline_orig$seat_km_adjust = (1000000000 / airline_orig$avail_seat_km_per_week)
+
+airline_per_trillion_base = as.data.frame(
+  airline_orig[
+    ,
+    c(1:3, 10)
+  ]
+)
+
+incidents_past = as.data.frame(airline_per_trillion_base$seat_km_adjust * airline_orig$incidents_85_99)
+
+fatal_acc_past = as.data.frame(airline_per_trillion_base$seat_km_adjust * airline_orig$fatal_accidents_85_99)
+
+fatalities_past = as.data.frame(airline_per_trillion_base$seat_km_adjust * airline_orig$fatalities_85_99)
+
+incidents_pres = as.data.frame(airline_per_trillion_base$seat_km_adjust * airline_orig$incidents_00_14)
+
+fatal_acc_pres = as.data.frame(airline_per_trillion_base$seat_km_adjust * airline_orig$fatal_accidents_00_14)
+
+fatalities_pres = as.data.frame(airline_per_trillion_base$seat_km_adjust * airline_orig$fatalities_00_14)
+
+airline_per_trillion = as.data.frame(
+  cbind(
+    airline_per_trillion_base,
+    incidents_past,
+    fatal_acc_past,
+    fatalities_past,
+    incidents_pres,
+    fatal_acc_pres,
+    fatalities_pres
+  )
+)
+
+colnames(airline_per_trillion) = c(
+  "airline",
+  "incl_reg_subsidiaries",
+  "actual_seat_km",
+  "adjusting_factor",
+  "incidents_past",
+  "fatal_accidents_past",
+  "fatalities_past",
+  "incidents_present",
+  "fatal_accidents_present",
+  "fatalities_present"
+)
+
+### Why all the extra code?
+# Simpler methods were causing issues with calc results displaying as factors instead of numbers and sorting
+# "alphabetically", or values overwriting the row names. This was the fastest workaround.
+
+head(airline_per_trillion)
+```
+
+This version of the data shows the accident and fatality figures per 1 trillion seat-kilometers, effectively removing the differences in size and scale of airlines as a factor in the results.
+
+## Analysis: Clustering
+
+**Objective**: Group the airlines into clusters based on their accident rates and relative "safety". 
+
+First, we'll scale the data by standard deviation (z-units) so that unequal units can be compared easily.
+
+```{r}
+airline_cluster_z_prep = as.data.frame(
+  airline_per_trillion[
+    ,
+    -c(1:2)
+  ]
+)
+
+airline_cluster_z = as.data.frame(
+  scale(
+    airline_cluster_z_prep
+  )
+)
+
+#Set the rowname to the airline name, to more easily interpret results
+rownames(airline_cluster_z) = airline_per_trillion$airline
+
+# Create a dataset for cluster analysis on the past history (1985-1999)
+# by dropping the variables we want to ignore. (subsidiaries, seat-km data, 2000-14 data)
+airline_cluster_z_past = as.data.frame(
+  airline_cluster_z[
+    ,
+    -c(1:2, 8:10)
+  ]
+)
+
+```
+
+### Clusters and Silhouette Plots: Past vs. Present
+
+We will use the k-Medoids function, also known as PAM (Partitioning Around Medoids), to group the arilines into clusters based on their safety records. The outputs of this analysis include a text summary, which lists every airline and the cluster to which it belongs, and a visual representation of that list, called a silhouette plot.
+
+#### 1985-1999
+```{r}
+library(cluster)
+
+CLUSTER.PAST.DISSIMILARITY.MATRIX = dist(
+  as.matrix(
+    airline_cluster_z_past,
+    method = "euclidean"
+  )
+)
+
+CLUSTER.PAST.PAM = pam(
+  CLUSTER.PAST.DISSIMILARITY.MATRIX,
+  2
+)
+
+summary(CLUSTER.PAST.PAM)
+
+plot(
+  CLUSTER.PAST.PAM,
+  main = "Silhouette Plot of Airline Incidents, 1985-1999 (k = 2)"
+     )
+```
+
+The silhouette plot shows the profile of our clusters. The closer the average width for each cluster is to 1, the more cohesive that cluster is. (each member is similar to the others)
+
+The result is a rough sorting based on risk of incidents/accidents.
+This analysis identified our "risky" airlines for 1985-99 as:
+
+- Ethiopian Airlines
+- Pakistan International
+- Aeroflot
+- China Airlines
+- Avianca
+- Egyptair
+- Philippine Airlines
+- Garuda Indonesia
+- Royal Air Maroc
+- Saudi Arabian
+
+#### 2000-2014
+Now let's repeat this for the 2000-14 data and check to see if our clusters have changed.
+
+```{r}
+airline_cluster_z_present = as.data.frame(
+  airline_cluster_z[
+    ,
+    -c(1:2, 5:7)
+  ]
+)
+
+library(cluster)
+
+CLUSTER.PRESENT.DISSIMILARITY.MATRIX = dist(
+  as.matrix(
+    airline_cluster_z_present,
+    method = "euclidean"
+  )
+)
+
+CLUSTER.PRESENT.PAM = pam(
+  CLUSTER.PRESENT.DISSIMILARITY.MATRIX,
+  2
+)
+
+summary(CLUSTER.PRESENT.PAM)
+
+plot(
+  CLUSTER.PRESENT.PAM,
+  main = "Silhouette Plot of Airline Incidents, 2000-2014 (k = 2)"
+     )
+```
+
+In this 15-year period, our risky airlines are: (repeats bolded)
+
+- **Pakistan International**
+- **Philippine Airlines**
+- **Royal Air Maroc**
+- **Ethiopian Airlines**
+- **Aeroflot**
+- **Avianca**
+- China Airlines
+- **Egyptair**
+- **Garuda Indonesia**
+- Vietnam Airlines
+- Xiamen Airlines
+- TACA
+- *Kenya Airways* might also need to be considered part of this list.
+
+### Dendrograms
+
+Additionally, we can create dendrograms to visualize how the data branches into clusters.
+
+**Past**:
+```{r}
+DENDRO.PAST = hclust(
+  CLUSTER.PAST.DISSIMILARITY.MATRIX
+)
+
+plot(
+  DENDRO.PAST,
+  main = "Dendrogram of Airline Incidents, 1985-1999"
+)
+```
+
+**Present**:
+```{r}
+DENDRO.PRESENT = hclust(
+  CLUSTER.PRESENT.DISSIMILARITY.MATRIX
+)
+
+plot(
+  DENDRO.PRESENT,
+  main = "Dendrogram of Airline Incidents, 2000-2014"
+)
+```
+
+### Conclusion: Cluster Analysis
+
+Clustering appears to indicate that most airlines with a past history of incidents and fatal accidents are likely to continue to experience those incidents in the present.
+
+However, most of the airlines identified as "risky" by clustering appear related to poorer countries. (e.g. Ethipoia, Pakistan, Philippines) This suggests that some measure like per-capita GDP of airline's home country may be a useful predictor.
+
+In the following sections, we will attempt to develop structured models, which focus directly on predicting the relationship between past and present safety records.
+
+
+## Analysis: Logistic Regression
+
+This is a commonly-used statistical model which predicts the odds of a binary (yes/no) outcome based on other available data.
+
+For this to work, we must create a binary variable, based on the question we want to answer.
+
+**Question**: Can past safety records predict whether or not an airline will have a poor safety record in the present?
+
+So we need to create a yes/no variable that defines a *poor safety record in the present*.
+Setting these paramaters is entirely up to the user. Consideration should find a balance between significance and the percentage of the data that meets the criteria. (7 fatal accidents is significant, but it occurs only once in the dataset. We need to have 25 to 50 percent of the data classified as YES in order to make an effective model.)
+
+For the purposes of this analysis, we well define **is_risky = TRUE** as any airline with **at least 10 fatalities per 1 trillion seat-kilometers, in the "present" time period*.
+
+*In the real world, however, this level of "risk" is about on par with your odds of winning the Powerball jackpot.*
+
+```{r}
+airline_per_trillion$is_risky = ifelse(
+  airline_per_trillion$fatalities_present >= 10,
+  1,   # value if TRUE
+  0    # value if FALSE
+)
+
+table(airline_per_trillion$is_risky)
+```
+
+Out of our 56 airlines, 19 have been classified as **risky**, or about 34 percent.
+
+Next, we split the data randomly into two partitions: a training set to build our model, and a test set to evaluate how well it predicts. We'll use a 70/30 split, resulting in 40 observations for training and 16 for testing
+
+```{r}
+library(caret)
+
+set.seed(111)
+
+TRAIN.INDEX = createDataPartition(
+  airline_per_trillion$is_risky,
+  p = 0.7,
+  list = FALSE,
+  times = 1
+)
+
+LOGIT.TRAIN.CARET = airline_per_trillion[
+  TRAIN.INDEX,
+]
+
+LOGIT.TEST.CARET = airline_per_trillion[
+  -TRAIN.INDEX,
+]
+```
+
+Now we can create a logistic regression model to try and predict **is_risky** based on past safety record.
+
+```{r}
+LOGIT.MODEL = glm(
+  LOGIT.TRAIN.CARET$is_risky ~
+    incl_reg_subsidiaries +
+    actual_seat_km +
+    incidents_past +
+    fatal_accidents_past +
+    fatalities_past,
+  data = LOGIT.TRAIN.CARET,
+  family = binomial()
+)
+
+options(scipen = 999)
+summary(LOGIT.MODEL)
+```
+
+None of our variables seem to be significant predictors. Let's evaluate this on the test set.
+
+```{r}
+LOGIT.PREDICT = predict(
+  LOGIT.MODEL,
+  newdata = LOGIT.TEST.CARET,
+  type = "response"
+)
+
+table(
+  LOGIT.TEST.CARET$is_risky,
+  LOGIT.PREDICT > 0.5
+)
+```
+
+The table above is a simple confusion matrix, showing the results of evaluating the logistic model on the test set.
+- The rows (0, 1) are predictions made by the model.
+- The columns (FALSE, TRUE) are the actual **is_risky** values in the test data.
+
+- Out of 10 arilines **not** identified as risky, the model successfully identified all 10.
+- However, it only correctly predicted 2 risky airlines--leaving 4 "False negatives".
+
+### Conclusion: Logistic Regression
+
+First, the regression model resulted in no statistically-significant predictors among past safety records for our current risk identifier. (p-values range from 0.12 to 0.45, when they are significant at 0.05 or less)
+
+Second, the confusion matrix revealed that our model could always identify "non-risky" airlines, but was worse than a coin toss when it came to identifying risky ones.
+
+Conclusion: Logistic Regression shows **no** significant link between past and present airline safety.
+
+
+## Analysis: Bagging
+
+Bagging is a complex ensemble model which combines a random forest (collection of randomly-generated decision trees) with bootstrapping (resampling the data to reduce error in estimations). Our goal, as before, is to use past safety data to predict our yes/no variable for present risk. We will again see a confusion matrix that shows how well the model performed on the test data.
+
+```{r}
+library(randomForest)
+
+set.seed(111)
+
+BAGGING.MODEL = randomForest(
+  as.factor(is_risky) ~
+    incl_reg_subsidiaries +
+    actual_seat_km +
+    incidents_past +
+    fatal_accidents_past +
+    fatalities_past,
+  data = LOGIT.TRAIN.CARET,
+  mtry = 5,
+  na.action = na.omit,
+  importance = TRUE
+)
+
+print(BAGGING.MODEL)
+
+```
+
+```{r}
+BAG.ACTUAL = LOGIT.TEST.CARET$is_risky
+
+BAG.PREDICTED = predict(
+  BAGGING.MODEL,
+  newdata = LOGIT.TEST.CARET,
+  type = "class"
+)
+
+BAG.RESULTS.MATRIX = confusionMatrix(
+  BAG.PREDICTED,
+  BAG.ACTUAL,
+  positive = "1"
+)
+
+print(BAG.RESULTS.MATRIX)
+```
+
+### Conclusion: Bagging
+
+Our results have changed from the regression model.
+
+First, the bagging model is correctly predicting risky airlines more often than not. **Sensitivity** measures how well the model predicts the "true" class. Thus, the model was right in predicting a risky airline 67 percent, or two-thirds, of the time.
+
+The prediction of non-risky airlines has suffered, however. While the logistic regression predicted 10 out of 10, this model is split 50/50. **Specificity** showes how accurately we're predicting the "false" class.
+
+**Accuracy** is the total success rate of all predictions. At 56 percent, it just barely beats the coin toss.
+
+**Kappa** is really the figure to look at, however. This statistic adjusts Accuracy to remove the effects of correct predictions due simply to chance. A Kappa value of 1 indicates that results are completely explained by the data. Values approaching 0 indicate that random chance is having a greater effect on the outcome.
+
+Our Kappa value is 0.1515, which suggests that almost 85 percent of correct predictions are due to random chance.
+
+Assuming that we can adjust accuracy by using (Accuracy * Kappa), our adjusted accuracy would be:
+
+```{r}
+print(0.5625 * 0.1515)
+```
+
+8.5 percent.
+
+Conclusion: Bagging shows definitively that past safety record is **not** a significant predictor of current risk.
+
+
+## Results
+
+With **Cluster Analysis**, we saw that many of the same airlines appeared in our "riskier" cluster for both the past and present time frames.
+
+**Logistic Regression** failed to provide any evidence for a link between past and current safety record.
+
+**Bagging**, through the Kappa statistic, reinforced the lack of significant predictive power.
+
+Conclusion: **There is no significant correlation between an airline's past history of incidents or fatalities and its current safety.**
+
+### Notes for Further Study
+
+Based on the most dangerous airlines revealed through clustering, it may be useful to include data on each airline's home country, like GDP per capita, to investigate a connection between home country and airline safety.
+
