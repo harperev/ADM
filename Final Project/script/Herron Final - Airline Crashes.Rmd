@@ -129,6 +129,69 @@ airline_cluster_z_past = as.data.frame(
 
 We will use the k-Medoids function, also known as PAM (Partitioning Around Medoids), to group the arilines into clusters based on their safety records. The outputs of this analysis include a text summary, which lists every airline and the cluster to which it belongs, and a visual representation of that list, called a silhouette plot.
 
+#### Testing Sizes of "k"
+
+Clustering functions don't require any objective or target to be defined, but they do depend on a user-specified number of clusters (k). To determine the most useful analysis, we'll look at a few different cluster sizes.
+
+```{r}
+library(cluster)
+
+CLUSTER.FULL.DISSIMILARITY.MATRIX = dist(
+  as.matrix(
+    airline_cluster_z,
+    method = "euclidean"
+  )
+)
+
+CLUSTER.FULL.PAM.2 = pam(
+  CLUSTER.FULL.DISSIMILARITY.MATRIX,
+  2
+)
+
+CLUSTER.FULL.PAM.3 = pam(
+  CLUSTER.FULL.DISSIMILARITY.MATRIX,
+  3
+)
+
+CLUSTER.FULL.PAM.4 = pam(
+  CLUSTER.FULL.DISSIMILARITY.MATRIX,
+  4
+)
+
+CLUSTER.FULL.PAM.5 = pam(
+  CLUSTER.FULL.DISSIMILARITY.MATRIX,
+  5
+)
+
+par(
+  mfrow = c(2, 2)
+)
+
+plot(
+  CLUSTER.FULL.PAM.2,
+  main = "Full Cluster, k = 2"
+)
+
+plot(
+  CLUSTER.FULL.PAM.3,
+  main = "Full Cluster, k = 3"
+)
+
+plot(
+  CLUSTER.FULL.PAM.4,
+  main = "Full Cluster, k = 4"
+)
+
+plot(
+  CLUSTER.FULL.PAM.5,
+  main = "Full Cluster, k = 5"
+)
+```
+
+The graphs above show the results of grouping the airlines into 2, 3, 4, and 5 clusters, respectively. "Average Silhouette Width" measures how cohesive the members are within a cluster. The 2-cluster model has the largest width, so this will be the most meaningful clustering model.
+
+To further improve the results of clustering, we will try separating the data to focus on only one time period at once, and running a separate cluster function on each.
+
 #### 1985-1999
 ```{r}
 library(cluster)
